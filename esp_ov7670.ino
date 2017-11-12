@@ -38,6 +38,8 @@ uint8_t  dma_decoded[DMA_DECODED_SIZE];
 intr_handle_t dma_intr_handle;
 volatile bool dma_interrupt = false;
 
+const char* GLYPHS = " .:-=+*#%@";
+
 
 void setup() {
   Serial.begin(115200);
@@ -74,6 +76,19 @@ void setup() {
   setTestPattern(OV7670_TESTPATTERN_GRAY_FADE);
   updateRegister(OV7670_REG_COM7, OV7670_FORMAT_MASK, OV7670_FORMAT_RGB);
   updateRegister(OV7670_REG_COM15, OV7670_FORMAT_RGB_MASK, OV7670_FORMAT_RGB_565);
+
+  // QQVGA 160×120
+  updateRegister(OV7670_REG_COM3, OV7670_COM3_DCW_MASK, OV7670_COM3_DCW_MASK);
+  updateRegister(
+    OV7670_REG_COM14,
+    OV7670_COM14_DCW_MASK | OV7670_COM14_SCALING_MASK | OV7670_COM14_PCLK_DIV_MASK,
+    OV7670_COM14_DCW_MASK | OV7670_COM14_SCALING_MASK | 0b010
+  );
+  updateRegister(OV7670_REG_SCALING_XSC, OV7670_SCALINGXSC_SCALING_MASK, 0x3A);
+  updateRegister(OV7670_REG_SCALING_YSC, OV7670_SCALINGYSC_SCALING_MASK, 0x35);
+  updateRegister(OV7670_REG_SCALING_DCWCTR, 0xFF, 0x22);
+  updateRegister(OV7670_REG_SCALING_PCLK_DIV, 0xFF, 0xF2);
+  updateRegister(OV7670_REG_SCALING_PCLK_DELAY, 0xFF, 0x02);
   check_state();
 
   Serial.println("Configuring I2S");
@@ -172,12 +187,13 @@ void loop() {
 
   for (int i = 0; i < length; i += 2) {
     uint8_t byte1 = dma_decoded[i];
-    uint8_t byte2 = dma_decoded[i];
-    uint8_t red   = (byte1 & 0b11111000);
-    uint8_t green = (((byte1 & 0b00000111) << 3) | ((byte2 & 0b11100000) >> 5)) << 2;
-    uint8_t blue  = (byte2 & 0b00011111) << 3;
-    Serial.print((red + green + blue)/3);
-    Serial.print(' ');
+    uint8_t byte2 = dma_decoded[i+1];
+    int red   = (byte1 & 0b11111000);
+    int green = (((byte1 & 0b00000111) << 3) | ((byte2 & 0b11100000) >> 5)) << 2;
+    int blue  = (byte2 & 0b00011111) << 3;
+    uint8_t intensity = (red + green + blue)/3;
+    Serial.print(GLYPHS[intensity / 28]);
+    if ((i / 2) % 160 == 159) Serial.print('\n');
   }
   Serial.println('.');
 }
@@ -275,7 +291,7 @@ void dma_configure() {
     dma_buffer_desc[i].eof    = 1;
     dma_buffer_desc[i].empty  = 0;
     dma_buffer_desc[i].buf    = dma_buffer[i];
-    //dma_buffer_desc[i].qe.stqe_next = &dma_buffer_desc[(i + 1) % DMA_NUM_BUFFERS];
+    dma_buffer_desc[i].qe.stqe_next = &dma_buffer_desc[(i + 1) % DMA_NUM_BUFFERS];
   }
 
   I2S0.rx_eof_num = 360*2; // sample_count
