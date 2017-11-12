@@ -28,12 +28,13 @@ extern "C" {
 
 #define DMA_NUM_BUFFERS 10
 #define DMA_BUFFER_SIZE 4092
+#define DMA_DECODED_SIZE (DMA_BUFFER_SIZE / 4)
 
 uint8_t* dma_buffer[DMA_NUM_BUFFERS];
 lldesc_t dma_buffer_desc[DMA_NUM_BUFFERS];
 volatile int      dma_current_buffer = 0;
 volatile int      dma_last_buffer = 0;
-uint8_t* dma_decoded[DMA_NUM_BUFFERS];
+uint8_t  dma_decoded[DMA_DECODED_SIZE];
 intr_handle_t dma_intr_handle;
 volatile bool dma_interrupt = false;
 
@@ -154,6 +155,31 @@ void loop() {
   if (!dma_interrupt) return;
   dma_interrupt = false;
   printf("Got data. last: %i current: %i\n", dma_last_buffer, dma_current_buffer);
+  // decode data
+  unsigned int length = min(
+    dma_buffer_desc[dma_last_buffer].length / 4,
+    DMA_DECODED_SIZE
+  );
+  uint8_t* input_cursor = dma_buffer[dma_last_buffer];
+  uint8_t* output_cursor = dma_decoded;
+  // b1 00 b0 00  b3 00 b2 00  b5 00 b4 00  b7 00 b6 00
+  // b0 b1 b2 b3  b4 b5 b6 b7 ...
+  for (int i = 0; i < length; i += 2) {
+    *(output_cursor++) = input_cursor[2];
+    *(output_cursor++) = input_cursor[0];
+    input_cursor += 4;
+  }
+
+  for (int i = 0; i < length; i += 2) {
+    uint8_t byte1 = dma_decoded[i];
+    uint8_t byte2 = dma_decoded[i];
+    uint8_t red   = (byte1 & 0b11111000);
+    uint8_t green = (((byte1 & 0b00000111) << 3) | ((byte2 & 0b11100000) >> 5)) << 2;
+    uint8_t blue  = (byte2 & 0b00011111) << 3;
+    Serial.print((red + green + blue)/3);
+    Serial.print(' ');
+  }
+  Serial.println('.');
 }
 
 static void IRAM_ATTR i2s_isr(void* arg) {
@@ -161,7 +187,6 @@ static void IRAM_ATTR i2s_isr(void* arg) {
   dma_last_buffer = dma_current_buffer;
   dma_current_buffer = (dma_current_buffer + 1) % DMA_NUM_BUFFERS;
   dma_interrupt = true;
-  Serial.println('.');
 }
 
 int enable_clock() {
